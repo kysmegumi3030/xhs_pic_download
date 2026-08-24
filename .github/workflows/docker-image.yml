@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  IMAGE_NAME: nfew/xhs_pic_download
+  IMAGE_NAME: kys00/xhs_dwd
 
 jobs:
   build-and-push:

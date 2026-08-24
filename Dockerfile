@@ -1,16 +1,22 @@
-FROM node:16-alpine
+# 使用官方 Playwright 镜像：已内置 Chromium 及其系统依赖
+# 镜像版本需与 package.json 中的 playwright 版本保持一致
+FROM mcr.microsoft.com/playwright:v1.62.1-jammy
 
-ENV TZ=Asia/Shanghai
+ENV TZ=Asia/Shanghai \
+    NODE_ENV=production \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
 
-COPY . /app/
+COPY package.json package-lock.json* /app/
 
-RUN npm install --production && \
+RUN npm install --omit=dev && \
     npm cache clean --force
+
+COPY . /app/
 
 EXPOSE 7776
 
-USER node
+USER pwuser
 
 CMD ["node", "web.js"]

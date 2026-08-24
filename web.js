@@ -1,4 +1,5 @@
 const doGetUrl = require("./main");
+const { closeBrowser } = require("./xhsPlaywright");
 
 var express = require("express");
 const bodyParser = require('body-parser');
@@ -26,10 +27,20 @@ app.all("/getXhsPicUrl", async function (req, res) {
     );
     res.send(JSON.stringify(result));
   } catch (e) {
+    console.log(e);
     res.send(JSON.stringify({
       error: e.message,
     }));
   }
 });
 
-app.listen(7776);
+const server = app.listen(7776);
+
+// 退出时关闭共享的 Chromium，避免残留进程
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, async () => {
+    server.close();
+    await closeBrowser();
+    process.exit(0);
+  });
+}
