@@ -58,21 +58,27 @@
 
 ### Docker（推荐）
 
-镜像基于 `mcr.microsoft.com/playwright`，已内置 Chromium 及其全部系统依赖，无需额外安装。
+镜像基于 `mcr.microsoft.com/playwright`，已内置 Chromium 及其全部系统依赖，无需额外安装。镜像已发布到 Docker Hub，直接拉取即可：
 
 ```sh
-# 构建镜像
-docker build -t nfew/xhs_pic_download:latest .
+# 拉取镜像
+docker pull kys00/xhs_dwd:latest
 
 # 启动容器
 docker run -d \
   -p 7776:7776 \
-  --shm-size=1g \
-  --name xhs_pic_download \
-  nfew/xhs_pic_download:latest
+  --shm-size=2g \
+  --name xhs_dwd \
+  kys00/xhs_dwd:latest
 ```
 
-> **建议加上 `--shm-size=1g`。** Chromium 对共享内存较敏感，Docker 默认的 64MB `/dev/shm` 在渲染较大页面时可能导致浏览器异常退出。
+如需自行构建（例如修改源码后）：
+
+```sh
+docker build -t kys00/xhs_dwd:latest .
+```
+
+> **必须加 `--shm-size=2g`。** Chromium 对共享内存敏感，Docker 默认的 64MB `/dev/shm` 在渲染较大页面时可能导致浏览器异常退出。启动参数中虽已加 `--disable-dev-shm-usage` 让 Chromium 走 `/tmp`，但增大 shm 仍是更稳妥的实践。
 
 验证是否启动成功：
 
@@ -186,9 +192,9 @@ a1=19ff4898b5xxxxxxxxxxxx; web_session=0400698dcexxxxxxxxxxxx
 | `XHS_API_SETTLE_MS` | `800` | 拦截到首个 API 后的额外等待（毫秒），用于等同批请求落地 |
 
 ```sh
-docker run -d -p 7776:7776 --shm-size=1g \
+docker run -d -p 7776:7776 --shm-size=2g \
   -e XHS_NAV_TIMEOUT=45000 \
-  --name xhs_pic_download nfew/xhs_pic_download:latest
+  --name xhs_dwd kys00/xhs_dwd:latest
 ```
 
 ---
@@ -223,12 +229,12 @@ docker run -d -p 7776:7776 --shm-size=1g \
 | `不包含图片` | 笔记确实无图无视频（纯文本笔记） |
 | `未能从分享文本中提取链接` | `shareText` 中不含 `http(s)://` 链接 |
 | `解析分享链接失败: …` | 短链接展开失败，通常是服务器网络不通或短链已失效 |
-| 浏览器启动异常 / 容器内崩溃 | 加大共享内存：`--shm-size=1g` |
+| 浏览器启动异常 / 容器内崩溃 | 加大共享内存：`--shm-size=2g` |
 
 查看容器日志定位问题：
 
 ```sh
-docker logs -f xhs_pic_download
+docker logs -f xhs_dwd
 ```
 
 ---
@@ -255,6 +261,8 @@ node web.js
 ---
 
 ## 声明
+
+本仓库是 [nfe-w/xhs_pic_download](https://github.com/nfe-w/xhs_pic_download) 的 fork，主要改动是将数据获取方式从「纯 HTTP + 解析 `window.__INITIAL_STATE__`」改为「Playwright 驱动真实 Chromium + 拦截笔记详情 API」，以解决小红书不再稳定内联 SSR 数据导致拿不到图片的问题。原仓库的声明继续适用：
 
 - 本仓库发布的 `xhs_pic_download` 项目中涉及的任何脚本，仅用于测试和学习研究，禁止用于商业用途
 - `nfe-w` 对任何脚本问题概不负责，包括但不限于由任何脚本错误导致的任何损失或损害
