@@ -201,19 +201,42 @@ docker run -d -p 7776:7776 --shm-size=2g \
 
 ## iPhone 快捷指令配置
 
-1. **部署服务**：按上文用 Docker 部署，确保接口可从手机所在网络访问。
+> ⚠️ 原作者 [nfe-w](https://github.com/nfe-w) 提供的 iCloud 快捷指令 <https://www.icloud.com/shortcuts/fef496ed540e42949e8154ddbf6ac8f9> 在本仓库移植后**不再适用**——它不传 `xhsCookie` 且很可能用 GET 请求，而移植后的服务必须 POST + JSON + Cookie 才能成功。
 
-2. **添加快捷指令**：在 iPhone 浏览器中打开
-   <https://www.icloud.com/shortcuts/fef496ed540e42949e8154ddbf6ac8f9>
-   点击「获取捷径」，再点「添加快捷指令」。
+### 1. 先用 curl 验证服务端跑通
 
-3. **填入服务地址**：点击刚添加的快捷指令右上角「···」进入编辑页，将部署地址填入「文本」区域，点右上角「完成」。
+替换 `YOUR_SERVER_IP` 和 Cookie 后执行：
 
-   > 格式形如 `http://1.2.3.4:7776/getXhsPicUrl`
+```sh
+curl -X POST http://YOUR_SERVER_IP:7776/getXhsPicUrl \
+  -H 'Content-Type: application/json' \
+  -d '{"shareText": "https://xhslink.cn/a/xxxxxx", "xhsCookie": "a1=...; web_session=..."}'
+```
 
-4. **使用**：在小红书 App 打开笔记 → 右上角分享箭头 → 「复制链接」→ 打开「快捷指令」App → 点击「一键保存小红书图片/视频」（会自动读取剪贴板）。
+预期返回 `{"picUrlArray": [...]}`。curl 跑通后再去配快捷指令，能省去端到端排查时间。
 
-> 若快捷指令未提供 Cookie 输入位置，可在其发送请求的步骤中，为 JSON 请求体额外增加一个 `xhsCookie` 字段。
+### 2. 在 iPhone 上手动创建快捷指令
+
+iOS 快捷指令没有公开的 JSON 导入格式（`.shortcut` 是 Apple 私有签名二进制 plist），所以无法直接导入 JSON 文件。仓库根目录的 [shortcut.json](shortcut.json) 是一份**结构化描述**，包含每个动作的精确配置和 14 步操作指南（`iphone_manual_steps` 字段），照着在「快捷指令」App 里 5 分钟即可手动重建。
+
+关键配置点（务必不要漏）：
+
+| 配置项 | 值 | 原因 |
+| --- | --- | --- |
+| HTTP 方法 | **POST** | [web.js:13](web.js) 只从 body 读 `xhsCookie`，GET 没有 body |
+| Header | `Content-Type: application/json` | 服务只挂了 `bodyParser.json()`（[web.js:8](web.js)），不支持 form-encoded |
+| 请求体 | `{"shareText": "<剪贴板>", "xhsCookie": "<你的Cookie>"}` | Cookie 必传，否则 Playwright 打开页面会被重定向到登录页 |
+| 下载图片的 Header | `Referer: https://www.xiaohongshu.com/` | 小红书 CDN 防盗链，缺失会 403 |
+
+> Cookie 会过期（通常 1–4 周），失效后服务端返回 `error_code=300011`，重新获取并替换快捷指令里的 `xhsCookie` 文本即可。
+
+### 3. 使用
+
+1. 小红书 App 打开笔记 → 右上角分享箭头 → 「复制链接」（带短链的分享文本会被复制到剪贴板）
+2. 打开「快捷指令」App → 点击「小红书图片下载」
+3. 等待循环下载完成，相册中可见全部图片/视频
+
+> 首次请求因 Chromium 冷启动可能耗时 5–10s，热请求 2–5s，属正常现象。视频文件较大时单次下载也可能耗时数秒。
 
 ---
 

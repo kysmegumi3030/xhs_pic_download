@@ -1,0 +1,198 @@
+{
+  "meta": {
+    "name": "小红书图片下载",
+    "icon": "照片",
+    "color": "#FF2442",
+    "description": "结合 Docker 部署的 kys00/xhs_dwd 服务，从小红书笔记下载全部无水印图片/视频到相册",
+    "warning": "iOS 快捷指令没有公开的 JSON 导入格式。.shortcut 文件是 Apple 私有签名的二进制 plist 格式，无法用 JSON 直接生成可导入文件。请将本文件作为参考，在「快捷指令」App 中按 steps 手动创建（约 5 分钟）。"
+  },
+  "variables": {
+    "SERVER_URL": {
+      "description": "xhs_pic_download 服务地址（请把 YOUR_SERVER_IP 替换为部署服务的实际 IP 或域名）",
+      "default": "http://YOUR_SERVER_IP:7776/getXhsPicUrl",
+      "note": "iPhone 所在网络必须能访问该地址。家庭部署通常用内网 IP；外网访问需配合反向代理或公网 IP。"
+    },
+    "XHS_COOKIE": {
+      "description": "小红书网页版 Cookie（必填，否则会被重定向到登录页导致失败）",
+      "default": "<在此粘贴 a1=...; web_session=... 字符串>",
+      "how_to_get": "电脑浏览器登录 www.xiaohongshu.com → F12 → Network → 刷新页面 → 点任意 xiaohongshu.com 请求 → Request Headers → 复制 cookie 整行",
+      "expires": "通常 1-4 周失效，失败后需重新获取并替换"
+    }
+  },
+  "steps": [
+    {
+      "id": 1,
+      "type": "get_clipboard",
+      "output": "share_text",
+      "comment": "读取剪贴板中的小红书分享文本（含短链）。先在小红书 App 内点分享→复制链接，再运行快捷指令。"
+    },
+    {
+      "id": 2,
+      "type": "text",
+      "value": "${SERVER_URL}",
+      "output": "server_url",
+      "comment": "服务端地址。在快捷指令编辑器里把 YOUR_SERVER_IP 替换为实际地址。"
+    },
+    {
+      "id": 3,
+      "type": "text",
+      "value": "${XHS_COOKIE}",
+      "output": "xhs_cookie",
+      "comment": "小红书 Cookie 字符串。在快捷指令编辑器里把占位符替换为实际 Cookie。"
+    },
+    {
+      "id": 4,
+      "type": "dictionary",
+      "value": {
+        "shareText": "${share_text}",
+        "xhsCookie": "${xhs_cookie}"
+      },
+      "output": "request_body",
+      "comment": "构造 JSON 请求体。shareText 来自步骤1，xhsCookie 来自步骤3。"
+    },
+    {
+      "id": 5,
+      "type": "get_url_content",
+      "url": "${server_url}",
+      "method": "POST",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "body": "${request_body}",
+      "body_format": "json",
+      "output": "api_response",
+      "timeout_seconds": 30,
+      "comment": "发送 POST + JSON 请求。注意：必须 POST + JSON，否则 xhsCookie 无法传递（web.js 只从 body 读 xhsCookie）。响应时间可能 2-5s，首次请求 5-10s（Chromium 冷启动）。"
+    },
+    {
+      "id": 6,
+      "type": "get_dict_value",
+      "input": "${api_response}",
+      "key": "picUrlArray",
+      "get_as": "list",
+      "output": "pic_url_array",
+      "comment": "从响应 JSON 提取 picUrlArray（图片+视频直链数组）。"
+    },
+    {
+      "id": 7,
+      "type": "get_dict_value",
+      "input": "${api_response}",
+      "key": "error",
+      "get_as": "string",
+      "output": "error_message",
+      "comment": "提取 error 字段（失败时存在）。"
+    },
+    {
+      "id": 8,
+      "type": "if",
+      "condition": "${error_message} has any value",
+      "if_true": [
+        {
+          "type": "show_alert",
+          "title": "小红书下载失败",
+          "message": "${error_message}",
+          "stop": true
+        }
+      ],
+      "if_false": [],
+      "comment": "有 error 时弹窗并停止；否则继续。常见错误：账号异常（Cookie 失效）、安全验证拦截、不包含图片（纯文本笔记）。"
+    },
+    {
+      "id": 9,
+      "type": "repeat_with_each",
+      "input": "${pic_url_array}",
+      "output": "current_url",
+      "steps": [
+        {
+          "id": 9.1,
+          "type": "get_url_content",
+          "url": "${current_url}",
+          "method": "GET",
+          "headers": {
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15",
+            "Referer": "https://www.xiaohongshu.com/",
+            "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+          },
+          "output": "media_data",
+          "comment": "下载单个图片/视频。Referer 用于绕过 CDN 防盗链。视频文件较大，可能耗时几秒。"
+        },
+        {
+          "id": 9.2,
+          "type": "save_to_photo_album",
+          "input": "${media_data}",
+          "album": "最近项目",
+          "comment": "保存到相册。视频会保存为视频，图片保存为图片。"
+        }
+      ],
+      "comment": "循环下载每个 URL 并保存到相册。数组顺序：图片 → Live Photo 视频 → 笔记视频。"
+    },
+    {
+      "id": 10,
+      "type": "show_notification",
+      "title": "小红书下载完成",
+      "body": "共保存 ${count(pic_url_array)} 个文件",
+      "comment": "完成通知，可在锁屏或通知中心查看。"
+    }
+  ],
+  "iphone_manual_steps": [
+    "1. 打开「快捷指令」App → 「快捷指令」标签页 → 右上角「+」新建快捷指令",
+    "2. 点顶部「新快捷指令」重命名为「小红书图片下载」，可点击图标设置颜色和图形",
+    "3. 在操作搜索框输入「获取剪贴板」，添加该动作（输出 share_text）",
+    "4. 添加「文本」动作，内容为 http://YOUR_SERVER_IP:7776/getXhsPicUrl（替换 YOUR_SERVER_IP）",
+    "5. 添加「文本」动作，内容为 a1=...; web_session=... （替换为实际 Cookie）",
+    "6. 添加「字典」动作，点击「添加新项」两次：",
+    "   - 第 1 项：键=shareText，类型=文本，值=点击「插入变量」选择「剪贴板」",
+    "   - 第 2 项：键=xhsCookie，类型=文本，值=点击「插入变量」选择步骤5的文本",
+    "7. 添加「获取 URL 内容」动作：",
+    "   - URL=点击「插入变量」选择步骤4的文本",
+    "   - 点击「展开」展开高级选项",
+    "   - 方法=POST",
+    "   - Headers：点「添加新标头」，键=Content-Type，值=application/json",
+    "   - 请求体=点击「插入变量」选择步骤6的字典，类型选「JSON」",
+    "   - 该步骤输出为 api_response",
+    "8. 添加「从输入获取词典值」动作：",
+    "   - 获取=词典值，键=picUrlArray",
+    "   - 输入=点击「插入变量」选择步骤7的「字典」（即 api_response）",
+    "   - 该步骤输出为 pic_url_array",
+    "9. 再添加一个「从输入获取词典值」动作：",
+    "   - 获取=词典值，键=error",
+    "   - 输入=api_response",
+    "   - 输出为 error_message",
+    "10. 添加「如果」动作：",
+    "   - 输入=error_message",
+    "   - 条件=有任意值",
+    "   - 在「如果」分支内：",
+    "     a) 添加「显示提醒」动作，提醒=error_message，标题=小红书下载失败",
+    "     b) 添加「停止」动作",
+    "11. 在「如果」下方（结束之后）添加「重复以下每个」动作：",
+    "   - 输入=pic_url_array",
+    "12. 在「重复」内添加「获取 URL 内容」动作：",
+    "   - URL=点击「插入变量」选择「重复项」",
+    "   - 方法=GET",
+    "   - 展开 Headers，添加两个标头：",
+    "     a) User-Agent = Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15",
+    "     b) Referer = https://www.xiaohongshu.com/",
+    "   - 输出为 media_data",
+    "13. 在「重复」内再添加「存储到照片」动作：",
+    "   - 输入=media_data",
+    "14. 「重复」结束后添加「显示通知」动作：",
+    "   - 标题=小红书下载完成",
+    "   - 内容=共保存 N 个文件（N 可用「计算」动作统计 pic_url_array 的数量）"
+  ],
+  "curl_test_command": "curl -X POST http://YOUR_SERVER_IP:7776/getXhsPicUrl \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"shareText\": \"https://xhslink.cn/a/xxxxx\", \"xhsCookie\": \"a1=...; web_session=...\"}'",
+  "expected_success_response": {
+    "picUrlArray": [
+      "https://ci.xiaohongshu.com/1040g00831abcdefg?imageView2/2/w/0/format/png",
+      "https://sns-video-bd.xhscdn.com/....mp4"
+    ]
+  },
+  "expected_failure_response": {
+    "error": "无法打开笔记页（账号异常，请稍后重试（error_code=300011）），请在请求中传入有效的 xhsCookie，并确保链接包含 xsec_token"
+  },
+  "troubleshooting": {
+    "超时": "iOS 快捷指令「获取 URL 内容」默认超时较长，但首次请求因 Chromium 冷启动可能 5-10s。如频繁超时，检查服务端日志：docker logs -f xhs_dwd",
+    "Cookie 失效": "重新登录 www.xiaohongshu.com 获取新 Cookie，在快捷指令编辑器里替换步骤5的文本",
+    "下载图片 403": "确认步骤12的 Referer 头已设置，小红书 CDN 校验防盗链",
+    "视频文件大": "视频可能数十 MB，下载耗时较长，正常现象"
+  }
+}
