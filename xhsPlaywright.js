@@ -98,11 +98,19 @@ const NOTE_API_PATHS = [
   '/api/sns/h5/v1/note_info',
 ]
 
+// `/api/sns/web/v1/note/` 前缀下还挂着一批与笔记内容无关的埋点/统计接口，
+// 它们同样返回 success:true，会被误当成详情响应：
+// 既让日志谎报「拦截到 API」，也会提前结束等待、浪费 API_SETTLE_MS。
+const NOTE_API_EXCLUDE = /\/(metrics_report|report|like|dislike|collect|uncollect|comment)(\/|$|\?)/
+
 function isNoteDetailApi(url) {
   if (!url.includes('edith')) {
     return false
   }
-  return NOTE_API_PATHS.some((path) => url.includes(path))
+  if (!NOTE_API_PATHS.some((path) => url.includes(path))) {
+    return false
+  }
+  return !NOTE_API_EXCLUDE.test(url)
 }
 
 function looksLikeNote(obj) {
@@ -171,6 +179,30 @@ function describeRedirect(currentUrl) {
   return `无法打开笔记页（${reason}），请在请求中传入有效的 xhsCookie，并确保链接包含 xsec_token`
 }
 
+// 从页面 __INITIAL_STATE__ 读 note（仅接受真正带媒体字段的）
+function readNoteFromInitialState(page) {
+  return page
+    .evaluate(() => {
+      const state = window.__INITIAL_STATE__
+      const map = state && state.note && state.note.noteDetailMap
+      if (!map) {
+        return null
+      }
+      const hasMedia = (n) => n && (n.imageList || n.image_list || n.video || n.cover)
+      const firstNoteId = state.note.firstNoteId
+      if (firstNoteId && map[firstNoteId] && hasMedia(map[firstNoteId].note)) {
+        return map[firstNoteId].note
+      }
+      for (const key of Object.keys(map)) {
+        if (map[key] && hasMedia(map[key].note)) {
+          return map[key].note
+        }
+      }
+      return null
+    })
+    .catch(() => null)
+}
+
 /**
  * 用真实 Chromium 打开笔记页面，拦截小红书自己发出的详情 API，拿到完整 note 数据。
  * 浏览器会自动带上 X-s / X-t / X-s-common 签名，无需手动生成。
@@ -226,8 +258,28 @@ async function fetchNoteViaPlaywright(fullUrl, xhsCookie) {
       console.log(`页面加载超时，继续尝试解析: ${e.message}`)
     }
 
-    // 等第一个详情 API 落地（拿不到就走 __INITIAL_STATE__ 兜底）
-    await Promise.race([firstHit, page.waitForTimeout(API_WAIT_TIMEOUT)])
+    // 等详情 API 落地。实测很多笔记页根本不发详情 API（数据直接 SSR 进
+    // __INITIAL_STATE__），此时死等 API_WAIT_TIMEOUT 会让每个请求都白等满
+    // 15s。所以改为「API 命中」与「页面状态已可用」二者竞速，谁先到用谁。
+    const stateReady = (async () => {
+      const deadline = Date.now() + API_WAIT_TIMEOUT
+      while (Date.now() < deadline) {
+        const note = await readNoteFromInitialState(page)
+        if (note) {
+          return note
+        }
+        await page.waitForTimeout(250)
+      }
+      return null
+    })()
+
+    const earlyStateNote = await Promise.race([
+      firstHit.then(() => null),
+      stateReady,
+      page.waitForTimeout(API_WAIT_TIMEOUT).then(() => null),
+    ])
+
+    // 若是 API 先命中，多等一会儿让同批请求（如多图分片）都落地
     if (apiPayloads.length > 0) {
       await page.waitForTimeout(API_SETTLE_MS)
     }
@@ -237,6 +289,7 @@ async function fetchNoteViaPlaywright(fullUrl, xhsCookie) {
       throw new Error('被小红书安全验证拦截，请更新 xhsCookie 后重试')
     }
 
+    // API 数据比 SSR 更完整，优先使用
     for (const payload of apiPayloads) {
       const note = pickNoteFromApiPayload(payload)
       if (note) {
@@ -244,28 +297,8 @@ async function fetchNoteViaPlaywright(fullUrl, xhsCookie) {
       }
     }
 
-    // 兜底：直接读页面里的初始状态（仅接受真正带媒体字段的 note）
-    const stateNote = await page
-      .evaluate(() => {
-        const state = window.__INITIAL_STATE__
-        const map = state && state.note && state.note.noteDetailMap
-        if (!map) {
-          return null
-        }
-        const hasMedia = (n) =>
-          n && (n.imageList || n.image_list || n.video || n.cover)
-        const firstNoteId = state.note.firstNoteId
-        if (firstNoteId && map[firstNoteId] && hasMedia(map[firstNoteId].note)) {
-          return map[firstNoteId].note
-        }
-        for (const key of Object.keys(map)) {
-          if (map[key] && hasMedia(map[key].note)) {
-            return map[key].note
-          }
-        }
-        return null
-      })
-      .catch(() => null)
+    // 兜底：页面内的初始状态（竞速阶段可能已经读到）
+    const stateNote = earlyStateNote || (await readNoteFromInitialState(page))
 
     if (stateNote) {
       return { note: stateNote, source: 'initial_state' }

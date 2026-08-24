@@ -67,15 +67,51 @@ async function getFullURL(shortURLWithText) {
   }
 }
 
-// 图片 trace id：从任意 sns-*.xhscdn.com 图片地址中提取，用于拼无水印原图
-const PIC_ID_REGEX = /https?:\/\/sns-[\w-]+\.xhscdn\.com\/(?:\d+\/[0-9a-z]+\/)?([^/!?\s]+)/
-
-function extractPicId(url) {
+// 无水印原图靠 ci.xiaohongshu.com/{fileId} 拼接。
+//
+// fileId 形如 `oss-sg/notes/1040g3l03248c7jhe2o...`——**带 bucket 前缀**，
+// 不等于 CDN 地址 path 的最后一段。实测（2026-08-24，真实笔记）：
+//   ci/{fileId}?imageView2/2/w/0/format/png  → 200 image/png 5.1MB  ← 唯一可用
+//   ci/{path 最后一段}                        → 404
+//   urlDefault 原样                            → 200 但仅 298KB webp（压缩过）
+// 因此必须优先取 fileId；从 URL path 提取只作兜底（旧数据 / 字段缺失时）。
+function extractPicIdFromUrl(url) {
   if (!url || typeof url !== 'string') {
     return null
   }
-  const match = url.match(PIC_ID_REGEX)
-  return match && match[1] ? match[1] : null
+  // 视频域不是图片，不能拼 ci.xiaohongshu.com
+  if (!/^https?:\/\/sns-(?!video)[^.]+\.xhscdn\.com\//.test(url)) {
+    return null
+  }
+  let pathname
+  try {
+    pathname = new URL(url).pathname
+  } catch (e) {
+    return null
+  }
+  const segments = pathname.split('/').filter(Boolean)
+  if (segments.length === 0) {
+    return null
+  }
+  // 去掉 `!nd_dft_wlteh_webp_3` 这类尺寸/格式修饰符
+  const lastSegment = segments[segments.length - 1].split('!')[0]
+  if (!lastSegment) {
+    return null
+  }
+  // 尽量还原 bucket 前缀：跳过 timestamp 段（纯数字）与 hash 段（长十六进制）
+  const prefix = segments
+    .slice(0, -1)
+    .filter((seg) => !/^\d+$/.test(seg) && !/^[0-9a-f]{16,}$/i.test(seg))
+  return [...prefix, lastSegment].join('/')
+}
+
+// 优先用 note 数据里现成的 fileId，其次回退到从 URL 解析
+function extractPicId(item, candidateUrl) {
+  const fileId = item && (item.fileId || item.file_id)
+  if (fileId && typeof fileId === 'string') {
+    return fileId
+  }
+  return extractPicIdFromUrl(candidateUrl)
 }
 
 // API(snake_case) 与 __INITIAL_STATE__(camelCase) 的字段命名不同，这里统一收集候选地址
@@ -173,10 +209,17 @@ async function getPicUrl(fullUrl, xhsCookie) {
 
   const picIdArray = []
   for (const item of imageList) {
-    for (const candidate of collectImageCandidates(item)) {
-      const picId = extractPicId(candidate)
-      if (picId) {
-        picIdArray.push(picId)
+    // fileId 直接可用时不必看 URL；否则逐个候选地址尝试解析
+    const candidates = collectImageCandidates(item)
+    const picId = extractPicId(item, candidates[0])
+    if (picId) {
+      picIdArray.push(picId)
+      continue
+    }
+    for (const candidate of candidates.slice(1)) {
+      const fallbackId = extractPicId(item, candidate)
+      if (fallbackId) {
+        picIdArray.push(fallbackId)
         break
       }
     }
