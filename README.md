@@ -24,25 +24,31 @@
 
 ## 工作原理
 
-小红书早期会把完整笔记数据直接内联在页面 HTML 的 `window.__INITIAL_STATE__` 中，因此只需请求页面源码即可解析出 `imageList`。目前该数据已不再稳定内联，纯 HTTP 抓取 HTML 的方式经常拿不到图片列表。
+小红书早期会把完整笔记数据直接内联在页面 HTML 的 `window.__INITIAL_STATE__` 中，因此只需请求页面源码即可解析出 `imageList`。但纯 HTTP 抓取时小红书会拦截未登录/无签名的请求，经常拿不到图片列表。
 
-现在的实现方式是 **用 Playwright 驱动真实 Chromium 打开笔记页，拦截小红书前端自己发出的笔记详情 API 响应**：
+现在的实现方式是 **用 Playwright 驱动真实 Chromium 打开笔记页**，两条取数路径并行竞速，谁先就绪用谁：
 
 ```
 请求 shareText
   └─ 解析短链接，得到完整笔记 URL（保留 xsec_token）
        └─ Playwright 打开笔记页（注入反检测脚本 + Cookie）
-            ├─ 拦截详情 API 响应  ← 主路径
+            ├─ 拦截详情 API 响应（数据更完整，优先采用）
             │    /api/sns/web/v1/feed
             │    /api/sns/web/v1/note/
             │    /api/sns/h5/v1/note_info
-            └─ 未拦截到则回退读取 window.__INITIAL_STATE__  ← 兜底
+            └─ 轮询页面内的 window.__INITIAL_STATE__
                  └─ 提取图片 / Live Photo / 视频直链
 ```
 
-这样做的关键收益：小红书 API 需要 `X-s` / `X-t` / `X-s-common` 签名参数，**由真实浏览器自动生成，无需自行实现签名算法**。
+关键收益：小红书 API 需要 `X-s` / `X-t` / `X-s-common` 签名参数，**由真实浏览器自动生成，无需自行实现签名算法**；页面内的 `__INITIAL_STATE__` 也只有在浏览器真正通过风控后才会填充。
 
-提取到图片后，仍沿用原有做法：从 CDN 地址中取出图片 ID，拼接为 `https://ci.xiaohongshu.com/{id}?imageView2/2/w/0/format/png` 得到无水印原图。
+> **实测（2026-08-24）：多数笔记页的数据是直接 SSR 进 `__INITIAL_STATE__` 的，并不会发出详情 API。** 因此两条路径设计为竞速而非「主路径 + 兜底」——若死等 API 超时（`XHS_API_WAIT_TIMEOUT`，默认 15s），每个请求都会白等满。竞速后单次请求约 1s。
+
+提取到图片后，从 note 数据的 `fileId` 字段拼接无水印原图：`https://ci.xiaohongshu.com/{fileId}?imageView2/2/w/0/format/png`。
+
+> `fileId` 形如 `oss-sg/notes/1040g3l03248c7jhe2o…`，**带 bucket 前缀**，并不等于 CDN 地址 path 的最后一段。若只取最后一段（如 `1040g3l…`）拼接，`ci.xiaohongshu.com` 会返回 404。直接用 `urlDefault` 虽然能下载，但拿到的是压缩过的 webp（几百 KB），而非原图（数 MB）。
+
+> `fileId` 形如 `oss-sg/notes/1040g3l03248c7jhe2o…`，**带 bucket 前缀**，并不等于 CDN 地址 path 的最后一段。若只取最后一段（如 `1040g3l…`）拼接，`ci.xiaohongshu.com` 会返回 404。直接用 `urlDefault` 虽然能下载，但拿到的是压缩过的 webp（几百 KB），而非原图（数 MB）。
 
 ### 相关文件
 
@@ -112,8 +118,8 @@ curl -X POST http://127.0.0.1:7776/getXhsPicUrl \
 ```json
 {
   "picUrlArray": [
-    "https://ci.xiaohongshu.com/1040g00831abcdefg?imageView2/2/w/0/format/png",
-    "https://ci.xiaohongshu.com/1040g00831hijklmn?imageView2/2/w/0/format/png",
+    "https://ci.xiaohongshu.com/oss-sg/notes/1040g3l03248c7jhe2o?imageView2/2/w/0/format/png",
+    "https://ci.xiaohongshu.com/notes_uhdr/1040g3qg3248cbp6jns10?imageView2/2/w/0/format/png",
     "https://sns-video-bd.xhscdn.com/....mp4"
   ]
 }
