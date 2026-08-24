@@ -1,0 +1,617 @@
+<title>小红书下载器移植现状</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;700&family=Noto+Sans+SC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    --paper:      #F6F7F9;
+    --surface:    #FFFFFF;
+    --surface-2:  #EDF0F4;
+    --ink:        #1B2027;
+    --ink-2:      #4A5460;
+    --ink-3:      #7A8492;
+    --rule:       #D8DEE6;
+    --steel:      #2C5F7C;
+    --steel-soft: #E4EDF3;
+    --ok:         #2E7D53;
+    --ok-soft:    #E2F0E7;
+    --warn:       #9A6503;
+    --warn-soft:  #F7EDD8;
+    --bad:        #A33B2A;
+    --bad-soft:   #F6E4E0;
+
+    --measure: 68ch;
+    --s1: 0.4rem; --s2: 0.7rem; --s3: 1.1rem;
+    --s4: 1.7rem; --s5: 2.6rem; --s6: 4rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #12161B;
+      --surface:    #1A1F26;
+      --surface-2:  #232A33;
+      --ink:        #DFE5EC;
+      --ink-2:      #A8B2BF;
+      --ink-3:      #77828F;
+      --rule:       #2E3742;
+      --steel:      #85B8D4;
+      --steel-soft: #1D2C36;
+      --ok:         #62B685;
+      --ok-soft:    #16281E;
+      --warn:       #D9A63C;
+      --warn-soft:  #2A2113;
+      --bad:        #DD8571;
+      --bad-soft:   #2B1A16;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:      #12161B;
+    --surface:    #1A1F26;
+    --surface-2:  #232A33;
+    --ink:        #DFE5EC;
+    --ink-2:      #A8B2BF;
+    --ink-3:      #77828F;
+    --rule:       #2E3742;
+    --steel:      #85B8D4;
+    --steel-soft: #1D2C36;
+    --ok:         #62B685;
+    --ok-soft:    #16281E;
+    --warn:       #D9A63C;
+    --warn-soft:  #2A2113;
+    --bad:        #DD8571;
+    --bad-soft:   #2B1A16;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    font-weight: 400;
+    font-size: 1rem;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: var(--s5) var(--s4) var(--s6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s5);
+  }
+
+  /* ---------- header ---------- */
+
+  header { display: flex; flex-direction: column; gap: var(--s3); }
+
+  .eyebrow {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  h1 {
+    font-family: "Noto Serif SC", Georgia, serif;
+    font-weight: 700;
+    font-size: clamp(1.9rem, 5vw, 2.7rem);
+    line-height: 1.24;
+    letter-spacing: -0.01em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .standfirst {
+    font-size: 1.06rem;
+    color: var(--ink-2);
+    max-width: var(--measure);
+    margin: 0;
+  }
+
+  /* ---------- status strip ---------- */
+
+  .strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: var(--s2);
+    border-top: 1px solid var(--rule);
+    padding-top: var(--s3);
+  }
+
+  .cell {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--edge, var(--rule));
+    padding: var(--s2) var(--s3);
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .cell.ok   { --edge: var(--ok); }
+  .cell.warn { --edge: var(--warn); }
+  .cell.bad  { --edge: var(--bad); }
+
+  .cell .what {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .cell .state { font-weight: 700; font-size: 1.02rem; }
+  .cell.ok   .state { color: var(--ok); }
+  .cell.warn .state { color: var(--warn); }
+  .cell.bad  .state { color: var(--bad); }
+  .cell .note { font-size: 0.83rem; color: var(--ink-2); line-height: 1.5; }
+
+  /* ---------- sections ---------- */
+
+  section { display: flex; flex-direction: column; gap: var(--s3); }
+
+  h2 {
+    font-family: "Noto Serif SC", Georgia, serif;
+    font-weight: 700;
+    font-size: 1.42rem;
+    line-height: 1.35;
+    margin: 0;
+    padding-bottom: var(--s1);
+    border-bottom: 2px solid var(--ink);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--s2);
+    flex-wrap: wrap;
+  }
+
+  h3 {
+    font-family: "Noto Sans SC", sans-serif;
+    font-weight: 700;
+    font-size: 1.02rem;
+    margin: 0;
+    color: var(--ink);
+  }
+
+  p { margin: 0; max-width: var(--measure); }
+  p + p { margin-top: calc(var(--s2) * -1 + var(--s2)); }
+
+  a { color: var(--steel); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:hover { text-decoration-thickness: 2px; }
+  a:focus-visible { outline: 2px solid var(--steel); outline-offset: 2px; border-radius: 2px; }
+
+  code {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.85em;
+    background: var(--surface-2);
+    padding: 0.1em 0.36em;
+    border-radius: 3px;
+    word-break: break-word;
+  }
+
+  .pill {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 500;
+    padding: 0.18em 0.6em;
+    border-radius: 100px;
+    white-space: nowrap;
+  }
+  .pill.ok   { background: var(--ok-soft);   color: var(--ok); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.bad  { background: var(--bad-soft);  color: var(--bad); }
+  .pill.info { background: var(--steel-soft); color: var(--steel); }
+
+  ul { margin: 0; padding-left: 1.15rem; max-width: var(--measure); display: flex; flex-direction: column; gap: var(--s1); }
+  li::marker { color: var(--ink-3); }
+
+  /* ---------- callout ---------- */
+
+  .box {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--edge, var(--steel));
+    padding: var(--s3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--s2);
+  }
+  .box.hyp  { --edge: var(--steel); background: var(--steel-soft); }
+  .box.gap  { --edge: var(--warn); }
+  .box.stop { --edge: var(--bad); }
+
+  .box .label {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.66rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  /* ---------- table ---------- */
+
+  .scroll { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 40rem;
+    font-size: 0.88rem;
+  }
+  caption {
+    caption-side: top;
+    text-align: left;
+    padding: var(--s2) var(--s3);
+    font-size: 0.82rem;
+    color: var(--ink-2);
+    border-bottom: 1px solid var(--rule);
+    background: var(--surface-2);
+  }
+  th, td { padding: var(--s2) var(--s3); text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
+  th {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 0.8rem; white-space: nowrap; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ---------- code block ---------- */
+
+  pre {
+    margin: 0;
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    padding: var(--s3);
+    overflow-x: auto;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.82rem;
+    line-height: 1.65;
+    color: var(--ink);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .cmt { color: var(--ink-3); }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    padding-top: var(--s3);
+    font-size: 0.85rem;
+    color: var(--ink-3);
+    display: flex; flex-direction: column; gap: var(--s1);
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">状态说明 · 2026-08-24</div>
+    <h1>小红书下载器移植现状</h1>
+    <p class="standfirst">
+      Playwright 拦截方案已移植并提交；Docker 推送受环境阻塞；快捷指令的下载循环已修复并实测通过。
+      归因与最初的两种猜测都不同——真正的原因是我自己引入的一处回归。
+    </p>
+
+    <div class="strip">
+      <div class="cell ok">
+        <span class="what">Playwright 移植</span>
+        <span class="state">已完成并提交</span>
+        <span class="note">21 项断言通过；未用真实 Cookie 端到端验证</span>
+      </div>
+      <div class="cell warn">
+        <span class="what">Docker 推送</span>
+        <span class="state">受阻</span>
+        <span class="note">本机无 Docker，需你执行</span>
+      </div>
+      <div class="cell ok">
+        <span class="what">快捷指令</span>
+        <span class="state">循环已修复</span>
+        <span class="note">mock 实测 3 个文件全部下载</span>
+      </div>
+    </div>
+  </header>
+
+  <section>
+    <h2>先说结论</h2>
+    <p>
+      服务端那半是好的：链接解析、API 拦截、图片提取都验证过。坏的是快捷指令这半——
+      它把请求发出去了、也拿到了响应，但没有下载任何文件。
+    </p>
+    <p>
+      你提出的假设（<strong>没有把返回内容转成词典</strong>）比我一直在追的方向更能解释证据。
+      详见<a href="#loop">循环为什么跑零次</a>。我没能验证它，因为每导入一个新的快捷指令都要手动点确认弹窗，
+      无法自动化迭代。
+    </p>
+  </section>
+
+  <section>
+    <h2>Playwright 拦截移植 <span class="pill ok">已提交 3e9fd52</span></h2>
+
+    <p>
+      原实现用 axios 抓 HTML、cheerio 解析 <code>window.__INITIAL_STATE__</code>。
+      小红书已不再稳定把 <code>imageList</code> 内联进 HTML，所以提取失败并抛 <code>不包含图片</code>。
+      现在改为真实 Chromium 打开笔记页、拦截小红书自己发出的详情 API，签名由浏览器生成。
+    </p>
+
+    <h3>在直接移植之外做的扩展</h3>
+    <ul>
+      <li>
+        调试真实笔记时发现详情请求实际走 <code>/api/sns/h5/v1/note_info</code>，
+        你的 Python 过滤条件没有覆盖这个端点，现已与两个 <code>web/v1</code> 端点一并匹配。
+      </li>
+      <li>各端点响应层级不一致（<code>items</code> / <code>note_list</code> / <code>note_card</code> 混用），改用有界递归定位 note。</li>
+      <li>为常驻服务适配：Chromium 跨请求复用、每请求独立 context 隔离 Cookie、收到退出信号时关闭浏览器。</li>
+      <li><code>main.js</code> 同时兼容 <code>snake_case</code>（API）与 <code>camelCase</code>（<code>__INITIAL_STATE__</code>）两套字段名。</li>
+    </ul>
+
+    <h3>验证到什么程度</h3>
+    <div class="scroll">
+      <table>
+        <caption>已验证 / 未验证的分界</caption>
+        <thead>
+          <tr><th>项目</th><th>结果</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>提取逻辑断言</td>
+            <td><span class="pill ok">7/7</span></td>
+            <td>多图、Live Photo、视频笔记、两套字段名、纯文本抛错</td>
+          </tr>
+          <tr>
+            <td>端点匹配与 payload 解析</td>
+            <td><span class="pill ok">14/14</span></td>
+            <td>含深层嵌套不死循环、无媒体返回 null</td>
+          </tr>
+          <tr>
+            <td>服务启停</td>
+            <td><span class="pill ok">通过</span></td>
+            <td>Chromium 正常启动，退出后无残留进程</td>
+          </tr>
+          <tr>
+            <td><code>/o/</code> 短链展开</td>
+            <td><span class="pill ok">通过</span></td>
+            <td>302 → <code>/discovery/item/…</code>，带完整 <code>xsec_token</code></td>
+          </tr>
+          <tr>
+            <td>真实笔记取图</td>
+            <td><span class="pill bad">未通过</span></td>
+            <td>所有尝试都被重定向到 <code>error_code=300011</code>（账号异常）</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box gap">
+      <span class="label">这里有个真实缺口</span>
+      <p>
+        成功路径目前<strong>只对照捕获到的响应结构验证过</strong>，没有一次真实取图成功。
+        无 Cookie 时小红书一律拦截，这是预期的登录限制而非代码缺陷，
+        但意味着「拿到 note 数据之后的提取逻辑」是按抓到的真实响应形状写的、而非按一次真实成功跑通验证的。
+        请用有效 <code>xhsCookie</code> 实测一次。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Docker 推送 <span class="pill warn">需你执行</span></h2>
+
+    <p>
+      本机没有 <code>docker</code> 可执行文件、没有 Docker.app，也没有 Podman / Colima / nerdctl，
+      所以我无法构建或推送镜像。
+    </p>
+
+    <div class="box">
+      <span class="label">更正我先前的说法</span>
+      <p>
+        我早前说 CI 硬编码为 <code>nfew/xhs_pic_download</code>、需要改。
+        这是错的——<a href=".github/workflows/docker-image.yml">docker-image.yml</a> 里
+        <code>IMAGE_NAME</code> 已经是 <code>kys00/xhs_dwd</code>，README 也在 7450cbc 对齐过了。
+        <strong>CI 和文档都不需要改</strong>，推 master 就会自动构建推送。
+      </p>
+    </div>
+
+    <p>如果要本机手动推：这台机器是 <code>arm64</code>，普通 <code>docker build</code> 只产出 arm64 镜像，跑不了常见的 amd64 VPS。</p>
+
+    <pre><code>docker login -u kys00
+
+<span class="cmt"># 多架构，适配 amd64 服务器 + arm64 本机</span>
+docker buildx create --use --name xhsbuilder
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t kys00/xhs_dwd:latest \
+  -t kys00/xhs_dwd:1.0.0 \
+  --push .</code></pre>
+
+    <ul>
+      <li>基础镜像是 <code>mcr.microsoft.com/playwright:v1.62.1-jammy</code>，约 2GB（含 Chromium），首次推送较慢。</li>
+      <li>仓库<strong>没有</strong> <code>.dockerignore</code>，<code>node_modules/</code> 和 <code>.git/</code> 会被送进构建上下文，拖慢构建。</li>
+      <li>建议同时打版本号而不只是 <code>latest</code>——否则将来 Playwright 升级出问题没法回滚。</li>
+    </ul>
+  </section>
+
+  <section id="loop">
+    <h2>快捷指令：循环为什么跑零次 <span class="pill bad">未解决</span></h2>
+
+    <p>
+      先说一个已推翻的前提：<a href="shortcut.json">shortcut.json</a> 里写着「无法用 JSON 直接生成可导入文件，只能手动创建」。
+      这个结论不成立——macOS 自带 <code>/usr/bin/shortcuts</code> 有 <code>sign</code> 子命令，
+      手写 plist 经 <code>--mode anyone</code> 签名后就是合法的 AEA1 文件，我实测导入成功了。
+      那 14 步手动操作不必做。
+    </p>
+
+    <h3>两个 plist 错误，其中一个是我自己造成的</h3>
+    <ul>
+      <li>
+        <strong>「未指定URL」</strong>：<code>WFURL</code> 是文本类型字段，我原先写成
+        <code>WFTextTokenAttachment</code>（纯变量类型），Shortcuts 认为字段为空。
+        改为 <code>WFTextTokenString</code>、变量作为附件挂在占位符位置后，该报错消失。
+      </li>
+      <li>
+        <strong><code>WFInput</code> 被我错误地包了两层</strong>
+        <span class="pill bad">这才是循环 0 次的真凶</span><br>
+        修上面那个报错时，我顺手把 6 处 <code>WFInput</code> 都改成了
+        <code>{Type: "Variable", Variable: …}</code> 双层结构，并以为这是修正。
+        实际上数据流动作（获取词典值 / 计数 / 重复 / 存储到照片）的 <code>WFInput</code>
+        <strong>必须是单层 attachment</strong>；包成双层后输入解析为空，
+        循环因此迭代 0 次、且不报任何错误。只有「如果」的条件输入才用双层。
+      </li>
+    </ul>
+
+    <h3>实测证据</h3>
+    <p>我用一个 mock 服务把整条链路跑了一遍，这样不需要 Cookie 也能看出断在哪一环。</p>
+
+    <h3>决定性的 2×2 对照</h3>
+    <p>
+      在两个维度上各取两种取值，跑出一张干净的对照表。
+      结论一眼可见：<strong>成败只随 <code>WFInput</code> 的层数变化，与「获取词典」无关</strong>。
+    </p>
+
+    <div class="scroll">
+      <table>
+        <caption>四个变体，只有 WFInput 层数决定成败</caption>
+        <thead>
+          <tr><th>变体</th><th>获取词典</th><th>WFInput</th><th>GET 增量</th><th>结果</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">XT1</td>
+            <td>无</td>
+            <td>双层</td>
+            <td class="num">0</td>
+            <td><span class="pill bad">失败</span> 静默，无报错</td>
+          </tr>
+          <tr>
+            <td class="mono">DICT1</td>
+            <td><strong>有</strong></td>
+            <td>双层</td>
+            <td class="num">0</td>
+            <td><span class="pill bad">失败</span> 加了词典也没用</td>
+          </tr>
+          <tr>
+            <td class="mono">FINAL</td>
+            <td><strong>有</strong></td>
+            <td><strong>单层</strong></td>
+            <td class="num">3</td>
+            <td><span class="pill ok">成功</span> p1/p2/p3.png 全下载</td>
+          </tr>
+          <tr>
+            <td class="mono">NODICT</td>
+            <td>无</td>
+            <td><strong>单层</strong></td>
+            <td class="num">3</td>
+            <td><span class="pill ok">成功</span> 没有词典也照样跑</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box hyp">
+      <span class="label">归因 · 与两种猜测都不同</span>
+      <p>
+        真凶是<strong>双层 <code>WFInput</code></strong>，而这是我在修「未指定URL」时顺手引入的回归。
+        它让「重复」动作的输入解析为空，循环迭代 0 次；而空列表的循环<strong>不报错</strong>，
+        所以表现成「POST 成功、下载 0 个文件、毫无提示」。
+      </p>
+      <p>
+        <strong>你的假设不是原因。</strong><code>NODICT</code> 证明了这点：
+        去掉「获取词典」、只保留单层 <code>WFInput</code>，循环依然跑出 3 个 GET。
+        不过它也没有害处——<code>FINAL</code> 同样通过，交付版本保留了这个动作，
+        因为响应确实是 JSON，显式转换在语义上更稳妥。
+      </p>
+      <p>
+        我先前把「重复项写法」当成第二个独立断点，也是错的。那些报错来自我为测试临时搭的
+        硬编码列表快捷指令（<code>LPA</code>/<code>LPD</code>），是测试脚手架自身的缺陷，
+        不是产品流程的问题。改回单层后，标准的按名称引用
+        <code>{Type: "Variable", VariableName: "Repeat Item"}</code> 工作正常。
+      </p>
+    </div>
+
+    <div class="box gap">
+      <span class="label">仍未验证的部分</span>
+      <ul>
+        <li>
+          <strong>真实笔记未跑通。</strong>以上全部基于 mock 服务
+          （返回固定的三个图片直链）。真实链路还需要有效 <code>xhsCookie</code> 与部署好的服务。
+        </li>
+        <li>
+          <strong>「存储到照片」未真正验证。</strong>mock 返回的是 1×1 PNG，
+          循环里的 GET 确认执行了，但没有确认图片真的进了相册——CLI 环境无相册权限。
+        </li>
+        <li>
+          <strong>「计数」动作曾导致 <code>shortcuts run</code> 卡死。</strong>
+          我做计数探针时它挂住了 120 秒。交付版本里位置 12 仍有这个动作（用于完成通知的数量），
+          在 <code>FINAL</code> 实测中它没有阻塞，但这个现象我没有查清。
+        </li>
+      </ul>
+    </div>
+
+    <div class="box gap">
+      <span class="label">一件需要你知道的事</span>
+      <ul>
+        <li>
+          测试中 <code>shareText</code> 一度是空字符串，是因为 <code>pbcopy</code> 在这个沙箱 shell 里写不进 GUI 剪贴板，
+          <strong>这是测试环境的假象，不是快捷指令的缺陷</strong>。最终的 <code>FINAL</code> 测试用静态文本绕过了它。
+        </li>
+      </ul>
+    </div>
+
+    <h3>为什么这个 bug 花了这么久</h3>
+    <p>
+      两个原因叠在一起。一是每导入一个新的 <code>.shortcut</code> 都要在 App 里手动点确认弹窗，
+      无法脚本化，所以每验证一个假设要十几秒到几分钟。
+    </p>
+    <p>
+      二是更根本的：我为了绕开导入慢，改用硬编码列表搭了几个测试快捷指令
+      （<code>LPA</code> / <code>LPD</code> / <code>LPF</code>），它们报出的
+      「请确保传递有效URL」把我引向了「重复项写法不对」这个错误方向——
+      那其实是我的测试脚手架自己的缺陷。我据此推断出「两个独立断点」，并写进了上一版文档，
+      这个推断是错的。真正解决问题的是回头做<strong>受控对照</strong>：
+      固定其余变量、只改一个维度，四次运行就定位了。
+    </p>
+  </section>
+
+  <section>
+    <h2>建议的下一步</h2>
+    <p>
+      快捷指令这条线已经可以交付了：重新导入
+      <a href="小红书图片下载.shortcut">小红书图片下载.shortcut</a>，
+      改掉前两个「文本」动作（服务器地址、Cookie），就能用。
+    </p>
+    <p>
+      剩下的都在服务端，且互相独立：装好 Docker 后推镜像；用真实
+      <code>xhsCookie</code> 跑一次 <code>curl</code> 确认取图成功；
+      然后在真机上跑一次完整流程，确认图片真的进了相册——
+      这一步是 mock 测不到的。
+    </p>
+  </section>
+
+  <footer>
+    <div><strong>遗留状态</strong></div>
+    <div>
+      <strong>需要你手动清理：</strong>本轮导入的 9 条测试快捷指令仍在你的资料库里
+      （<code>DICT1</code>、<code>PWITHOUT</code>、<code>PWITHOUT2</code>、<code>CWO</code>、
+      <code>UW</code>、<code>UWO</code>、<code>SINGLE</code>、<code>FINAL</code>、<code>NODICT</code>），
+      加上早先的 <code>xhs_signed</code>、<code>小红书图片下载_signed</code>。
+      脚本删不掉（Shortcuts Events 不支持删除，调用会假报成功），请在 App 里手动删除。
+      正式的「小红书图片下载」请保留。
+    </div>
+    <div>已清理：mock 服务全部关闭、无残留 Chromium 与 <code>shortcuts run</code> 进程、临时目录已删除。</div>
+    <div>
+      仓库：<code>build_shortcut.py</code>、<code>小红书图片下载.shortcut</code>、
+      <code>status.html</code> 三个文件未跟踪、未提交。
+      产物已确认晚于生成脚本，即为实测通过的版本。
+    </div>
+  </footer>
+
+</div>
