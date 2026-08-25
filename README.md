@@ -221,11 +221,26 @@ curl -X POST http://YOUR_SERVER_IP:7776/getXhsPicUrl \
 
 预期返回 `{"picUrlArray": [...]}`。curl 跑通后再去配快捷指令，能省去端到端排查时间。
 
-### 2. 在 iPhone 上手动创建快捷指令
+### 2. 直接导入 .shortcut 文件
 
-iOS 快捷指令没有公开的 JSON 导入格式（`.shortcut` 是 Apple 私有签名二进制 plist），所以无法直接导入 JSON 文件。仓库根目录的 [shortcut.json](shortcut.json) 是一份**结构化描述**，包含每个动作的精确配置和 14 步操作指南（`iphone_manual_steps` 字段），照着在「快捷指令」App 里 5 分钟即可手动重建。
+仓库根目录的 [小红书图片下载.shortcut](小红书图片下载.shortcut) 是已生成好的可导入快捷指令文件，由 [build_shortcut.py](build_shortcut.py) 依据 [shortcut.json](shortcut.json) 的结构化描述自动生成。导入后只需填入服务地址和 Cookie 即可使用，**不再需要 14 步手动重建**。
 
-关键配置点（务必不要漏）：
+**导入方式（任选其一）**：
+
+| 方式 | 操作 |
+| --- | --- |
+| **AirDrop** | Mac 下载本仓库中的 [小红书图片下载.shortcut](小红书图片下载.shortcut) → AirDrop 发送给 iPhone → 在弹窗中点「添加快捷指令」 |
+| **iCloud Drive** | 把文件放到 iCloud Drive → 在 iPhone 的「文件」App 中点击该文件 → 「添加快捷指令」 |
+| **Git clone + 拷贝** | `git clone` 后通过任意方式（邮件/网盘/U盘）将文件传到 iPhone 文件系统，再用「文件」App 打开 |
+
+导入后点击快捷指令右上角「···」进入编辑页，需要填入两处：
+
+1. **服务地址文本**：把 `http://YOUR_SERVER_IP:7776/getXhsPicUrl` 改成实际部署地址
+2. **Cookie 文本**：把 `a1=...; web_session=...` 占位符替换为你的真实 Cookie
+
+### 3. 关键配置点（仅供修改快捷指令时参考）
+
+[build_shortcut.py](build_shortcut.py) 生成的快捷指令已默认按以下规则配置，正常使用无需关心。仅当你在「快捷指令」App 里手动调整或重新生成 [shortcut.json](shortcut.json) 后才需要对照：
 
 | 配置项 | 值 | 原因 |
 | --- | --- | --- |
@@ -236,7 +251,17 @@ iOS 快捷指令没有公开的 JSON 导入格式（`.shortcut` 是 Apple 私有
 
 > Cookie 会过期（通常 1–4 周），失效后服务端返回 `error_code=300011`，重新获取并替换快捷指令里的 `xhsCookie` 文本即可。
 
-### 3. 使用
+### 4. 重新生成 .shortcut 文件（开发者）
+
+若修改了 [shortcut.json](shortcut.json) 的步骤结构、变量名或默认值，需要用 [build_shortcut.py](build_shortcut.py) 重新生成产物：
+
+```sh
+python3 build_shortcut.py   # 读取 shortcut.json，覆盖输出 小红书图片下载.shortcut
+```
+
+依赖仅标准库（`plistlib` + `uuid`），无需额外安装。
+
+### 5. 使用
 
 1. 小红书 App 打开笔记 → 右上角分享箭头 → 「复制链接」（带短链的分享文本会被复制到剪贴板）
 2. 打开「快捷指令」App → 点击「小红书图片下载」
