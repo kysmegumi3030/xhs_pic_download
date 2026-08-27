@@ -14,8 +14,12 @@ RUN npm install --omit=dev && \
     npm cache clean --force
 
 # Instagram 图片提取依赖（instaloader 使用 Python GraphQL API）
+# 基础镜像 mcr.microsoft.com/playwright:*-jammy 仅含 python3 解释器，不含 pip3，需先安装
 COPY requirements.txt /app/
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends python3-pip && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip3 install --no-cache-dir -r requirements.txt
 
 COPY . /app/
 
