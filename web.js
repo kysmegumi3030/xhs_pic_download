@@ -11,6 +11,7 @@ app.all("/getXhsPicUrl", async function (req, res) {
   res.set("Content-Type", "application/json");
   const shareText = req.query.shareText || req.body.shareText;
   const xhsCookie = req.body.xhsCookie;
+  const igCookie = req.body.igCookie;
   if (!shareText) {
     res.send(JSON.stringify({
       error: "缺少shareText参数",
@@ -22,6 +23,7 @@ app.all("/getXhsPicUrl", async function (req, res) {
       {
         shareText: shareText,
         xhsCookie: xhsCookie,
+        igCookie: igCookie,
       },
       null
     );

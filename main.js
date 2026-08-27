@@ -1,9 +1,80 @@
 const axios = require('axios')
+const { spawn } = require('child_process')
+const path = require('path')
 const { fetchNoteViaPlaywright } = require('./xhsPlaywright')
+
+// Instagram URL 检测
+const IG_URL_RE = /instagram\.com\/(?:p|reel|reels|tv)\//
+const IG_DOMAIN_RE = /(?:instagram\.com|instagr\.am)/
+const URL_EXTRACT_RE = /(https?:\/\/[^\s，<>]+)/
+
+// XHS URL 检测
+const XHS_DOMAIN_RE = /(?:xiaohongshu\.com|xhslink\.cn)/
+
+/**
+ * 从分享文本中提取 URL 并判断平台。
+ * 返回 'instagram' | 'xiaohongshu' | null
+ */
+function detectPlatform(shareText) {
+  const urlMatch = shareText.match(URL_EXTRACT_RE)
+  const url = urlMatch ? urlMatch[0] : shareText
+
+  if (IG_URL_RE.test(url) || (IG_DOMAIN_RE.test(url) && !XHS_DOMAIN_RE.test(url))) {
+    return 'instagram'
+  }
+  if (XHS_DOMAIN_RE.test(url)) {
+    return 'xiaohongshu'
+  }
+  // 无法识别域名时返回 null
+  return null
+}
+
+/**
+ * 调用 ig_helper.py 提取 Instagram 图片直链。
+ * stdin 写入 JSON，stdout 读取 JSON 结果。
+ */
+async function getIgPicUrl(shareText, igCookie) {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(__dirname, 'ig_helper.py')
+    const child = spawn('python3', [scriptPath], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+
+    const input = JSON.stringify({ shareText, igCookie: igCookie || '' })
+    child.stdin.write(input)
+    child.stdin.end()
+
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (d) => { stdout += d })
+    child.stderr.on('data', (d) => { stderr += d })
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        console.log(`ig_helper.py exited ${code}: ${stderr}`)
+        resolve({ error: `Instagram 处理失败 (exit ${code})` })
+        return
+      }
+      try {
+        const result = JSON.parse(stdout.trim())
+        resolve(result)
+      } catch (e) {
+        console.log(`ig_helper.py output parse error: ${stdout}`)
+        resolve({ error: 'Instagram 响应解析失败' })
+      }
+    })
+
+    child.on('error', (e) => {
+      console.log(`ig_helper.py spawn error: ${e.message}`)
+      resolve({ error: `Instagram 脚本启动失败: ${e.message}` })
+    })
+  })
+}
 
 module.exports = async function (params, context) {
   const shareText = params['shareText']
   const xhsCookie = params['xhsCookie']
+  const igCookie = params['igCookie']
   if (!shareText) {
     return {
       error: '缺少shareText参数',
@@ -11,13 +82,21 @@ module.exports = async function (params, context) {
   }
 
   console.log(`shareText->${shareText}`)
-  const fullUrl = await getFullURL(shareText)
-  console.log(`fullUrl->${fullUrl}`)
+  const platform = detectPlatform(shareText)
+  console.log(`platform->${platform || 'unknown'}`)
 
-  const picUrlArray = await getPicUrl(fullUrl, xhsCookie)
-  return {
-    picUrlArray,
+  if (platform === 'instagram') {
+    return await getIgPicUrl(shareText, igCookie)
   }
+
+  if (platform === 'xiaohongshu') {
+    const fullUrl = await getFullURL(shareText)
+    console.log(`fullUrl->${fullUrl}`)
+    const picUrlArray = await getPicUrl(fullUrl, xhsCookie)
+    return { picUrlArray }
+  }
+
+  return { error: '不支持的链接类型，请使用小红书或 Instagram 的分享链接' }
 }
 
 async function getHeaders() {

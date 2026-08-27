@@ -1,9 +1,9 @@
 {
   "meta": {
-    "name": "小红书图片下载",
+    "name": "小红书&Ins图片下载",
     "icon": "照片",
     "color": "#FF2442",
-    "description": "结合 Docker 部署的 kys00/xhs_dwd 服务，从小红书笔记下载全部无水印图片/视频到相册",
+    "description": "结合 Docker 部署的 kys00/xhs_dwd 服务，从小红书/Instagram 贴文下载全部无水印图片到相册",
     "warning": "iOS 快捷指令没有公开的 JSON 导入格式。.shortcut 文件是 Apple 私有签名的二进制 plist 格式，无法用 JSON 直接生成可导入文件。请将本文件作为参考，在「快捷指令」App 中按 steps 手动创建（约 5 分钟）。"
   },
   "variables": {

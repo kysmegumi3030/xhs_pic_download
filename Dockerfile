@@ -13,6 +13,10 @@ COPY package.json package-lock.json* /app/
 RUN npm install --omit=dev && \
     npm cache clean --force
 
+# Instagram 图片提取依赖（instaloader 使用 Python GraphQL API）
+COPY requirements.txt /app/
+RUN pip3 install --no-cache-dir -r requirements.txt
+
 COPY . /app/
 
 EXPOSE 7776

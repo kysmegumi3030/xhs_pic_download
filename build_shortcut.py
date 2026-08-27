@@ -96,11 +96,12 @@ actions = []
 # 0. 说明注释
 actions.append(action("is.workflow.actions.comment", {
     "WFCommentActionText":
-        "小红书图片下载\n\n"
+        "小红书 & Instagram 图片下载\n\n"
         "使用前请修改下面两处「文本」动作：\n"
         f"1) 服务地址：把 YOUR_SERVER_IP 换成部署 kys00/xhs_dwd 的实际 IP 或域名\n"
         "2) Cookie：粘贴小红书网页版 Cookie（a1=...; web_session=...）\n\n"
-        "用法：小红书 App 内分享→复制链接，然后运行本快捷指令。",
+        "用法：小红书或 Instagram App 内分享→复制链接，然后运行本快捷指令。\n"
+        "服务端会自动判断链接来源并使用对应的下载方式。",
 }))
 
 # 1. 获取剪贴板

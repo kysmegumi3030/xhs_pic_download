@@ -1,10 +1,10 @@
 # XhsPicDownload
 
-结合 iOS「快捷指令」，一键从小红书下载无水印图片 / 视频。
+结合 iOS「快捷指令」，一键从小红书 / Instagram 下载无水印图片。
 
-服务提供一个 HTTP 接口：传入小红书的分享文本或链接，返回该笔记中全部图片、Live Photo 视频、笔记视频的直链数组，由快捷指令批量保存到相册。
+服务提供一个 HTTP 接口：传入分享文本或链接，自动判断来源平台（小红书 / Instagram），返回该贴文中全部图片的直链数组，由快捷指令批量保存到相册。
 
-> Live Photo 会被拆分为「封面图片 + 一段视频」两个文件，可自行使用其他 App 合并。
+> 小红书的 Live Photo 会被拆分为「封面图片 + 一段视频」两个文件，可自行使用其他 App 合并。
 
 ---
 
@@ -24,21 +24,32 @@
 
 ## 工作原理
 
-小红书早期会把完整笔记数据直接内联在页面 HTML 的 `window.__INITIAL_STATE__` 中，因此只需请求页面源码即可解析出 `imageList`。但纯 HTTP 抓取时小红书会拦截未登录/无签名的请求，经常拿不到图片列表。
+小红书早期会把完整笔记数据直接内联在页面 HTML 的 `window.__INITIAL_STATE__` 中，因此只需请求页面源码即可解析出 `imageList`。但纯 HTTP 抓取时小红书会拦截未登录/无签名的请求，经常拿不到图片列表。Instagram 则通过 GraphQL API 提供数据，需要登录态或匿名会话。
 
-现在的实现方式是 **用 Playwright 驱动真实 Chromium 打开笔记页**，两条取数路径并行竞速，谁先就绪用谁：
+服务会根据链接域名自动判断来源平台，选择对应的技术方案：
 
 ```
-请求 shareText
-  └─ 解析短链接，得到完整笔记 URL（保留 xsec_token）
-       └─ Playwright 打开笔记页（注入反检测脚本 + Cookie）
-            ├─ 拦截详情 API 响应（数据更完整，优先采用）
-            │    /api/sns/web/v1/feed
-            │    /api/sns/web/v1/note/
-            │    /api/sns/h5/v1/note_info
-            └─ 轮询页面内的 window.__INITIAL_STATE__
-                 └─ 提取图片 / Live Photo / 视频直链
+剪贴板 shareText
+  └─ POST /getXhsPicUrl { shareText, xhsCookie?, igCookie? }
+       └─ Node.js 自动检测 URL 域名
+            ├─ xiaohongshu.com / xhslink.cn → Playwright 浏览器方案
+            │    ├─ 解析短链接，得到完整笔记 URL（保留 xsec_token）
+            │    ├─ Playwright 打开笔记页（注入反检测脚本 + Cookie）
+            │    │    ├─ 拦截详情 API 响应（数据更完整，优先采用）
+            │    │    └─ 轮询页面内的 window.__INITIAL_STATE__
+            │    └─ 从 note.fileId 拼接无水印原图
+            │
+            ├─ instagram.com / instagr.am → instaloader GraphQL 方案
+            │    ├─ 提取贴文 shortcode（/p/ABC, /reel/ABC）
+            │    ├─ 通过 GraphQL API 获取帖子元数据
+            │    └─ 提取图片 CDN 直链（scontent-*.cdninstagram.com）
+            │
+            └─ 其他域名 → 返回错误
+       └─ 返回统一格式 { picUrlArray: [...] }
+            └─ 快捷指令循环下载（GET + Referer 头）→ 保存到相册
 ```
+
+### 小红书：Playwright 浏览器方案
 
 关键收益：小红书 API 需要 `X-s` / `X-t` / `X-s-common` 签名参数，**由真实浏览器自动生成，无需自行实现签名算法**；页面内的 `__INITIAL_STATE__` 也只有在浏览器真正通过风控后才会填充。
 
@@ -48,15 +59,23 @@
 
 > `fileId` 形如 `oss-sg/notes/1040g3l03248c7jhe2o…`，**带 bucket 前缀**，并不等于 CDN 地址 path 的最后一段。若只取最后一段（如 `1040g3l…`）拼接，`ci.xiaohongshu.com` 会返回 404。直接用 `urlDefault` 虽然能下载，但拿到的是压缩过的 webp（几百 KB），而非原图（数 MB）。
 
-> `fileId` 形如 `oss-sg/notes/1040g3l03248c7jhe2o…`，**带 bucket 前缀**，并不等于 CDN 地址 path 的最后一段。若只取最后一段（如 `1040g3l…`）拼接，`ci.xiaohongshu.com` 会返回 404。直接用 `urlDefault` 虽然能下载，但拿到的是压缩过的 webp（几百 KB），而非原图（数 MB）。
+### Instagram：instaloader GraphQL 方案
+
+Instagram 的 GraphQL API 可通过 `instaloader` Python 库访问。公开帖文支持匿名访问，私密帖文需要登录态（通过 `igCookie` 参数传入）。
+
+支持的贴文类型：
+- 单图（`GraphImage`）→ 直接返回图片 CDN URL
+- 轮播（`GraphSidecar`）→ 遍历所有 sidecar 节点，返回每张图片 URL
+- 视频（`GraphVideo`）→ 暂不支持（instaloader 不暴露视频 CDN URL）
 
 ### 相关文件
 
 | 文件 | 职责 |
 | --- | --- |
 | [web.js](web.js) | Express 服务入口，暴露 `/getXhsPicUrl`，退出时关闭浏览器 |
-| [main.js](main.js) | 解析短链接、从 note 数据中提取图片 / 视频直链 |
-| [xhsPlaywright.js](xhsPlaywright.js) | 浏览器管理、API 响应拦截、note 数据定位 |
+| [main.js](main.js) | 平台检测、短链接解析、分发到对应处理器 |
+| [xhsPlaywright.js](xhsPlaywright.js) | 浏览器管理、API 响应拦截、note 数据定位（小红书） |
+| [ig_helper.py](ig_helper.py) | Instagram 图片直链提取（通过 instaloader GraphQL API） |
 
 ---
 
@@ -100,17 +119,18 @@ curl -X POST http://127.0.0.1:7776/getXhsPicUrl \
 
 ### `POST /getXhsPicUrl`
 
-请求体必须是 **JSON**（`Content-Type: application/json`）。
+请求体必须是 **JSON**（`Content-Type: application/json`）。服务会根据链接域名自动判断平台（小红书 / Instagram）。
 
 | 参数 | 位置 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `shareText` | JSON body 或 URL query | 是 | 小红书分享文本或链接，会自动用正则提取其中的 URL |
-| `xhsCookie` | **仅 JSON body** | 否（强烈建议传） | 小红书网页版 Cookie 字符串 |
+| `shareText` | JSON body 或 URL query | 是 | 分享文本或链接（小红书 / Instagram），会自动识别平台 |
+| `xhsCookie` | **仅 JSON body** | 否（小红书强烈建议） | 小红书网页版 Cookie 字符串 |
+| `igCookie` | **仅 JSON body** | 否 | Instagram Cookie 字符串（公开帖文不需要） |
 
-`shareText` 可直接传入小红书 App「复制链接」得到的整段文本（含中文描述），服务会自行提取链接部分。
+`shareText` 可直接传入 App「复制链接」得到的整段文本（含中文描述），服务会自行提取链接部分。
 
-> **注意两个限制：**
-> - `xhsCookie` 只从 JSON body 读取，因此**传 Cookie 必须用 POST + JSON**，无法通过 URL query 传递。
+> **注意：**
+> - `xhsCookie` / `igCookie` 只从 JSON body 读取，因此**必须用 POST + JSON**。
 > - 服务只挂载了 JSON body 解析，**不支持 form-encoded**（`-d "shareText=..."` 会被判定为缺少参数）。
 
 #### 成功响应
@@ -138,7 +158,7 @@ curl -X POST http://127.0.0.1:7776/getXhsPicUrl \
 #### 调用示例
 
 ```sh
-# 推荐：POST + JSON，带 Cookie
+# 小红书：POST + JSON，带 Cookie
 curl -X POST http://127.0.0.1:7776/getXhsPicUrl \
   -H 'Content-Type: application/json' \
   -d '{
@@ -146,7 +166,20 @@ curl -X POST http://127.0.0.1:7776/getXhsPicUrl \
         "xhsCookie": "a1=xxxxx; web_session=xxxxx"
       }'
 
-# 不带 Cookie（大概率被小红书拦截，仅用于连通性测试）
+# Instagram：公开帖文不需要 Cookie
+curl -X POST http://127.0.0.1:7776/getXhsPicUrl \
+  -H 'Content-Type: application/json' \
+  -d '{"shareText": "https://www.instagram.com/p/ABC123/"}'
+
+# Instagram：私密帖文需带 Cookie
+curl -X POST http://127.0.0.1:7776/getXhsPicUrl \
+  -H 'Content-Type: application/json' \
+  -d '{
+        "shareText": "https://www.instagram.com/p/ABC123/",
+        "igCookie": "sessionid=xxx; ds_user_id=yyy; csrftoken=zzz"
+      }'
+
+# 小红书不带 Cookie（大概率被拦截，仅用于连通性测试）
 curl -X POST http://127.0.0.1:7776/getXhsPicUrl \
   -H 'Content-Type: application/json' \
   -d '{"shareText": "https://www.xiaohongshu.com/explore/xxx?xsec_token=yyy"}'
@@ -154,7 +187,9 @@ curl -X POST http://127.0.0.1:7776/getXhsPicUrl \
 
 ---
 
-## Cookie 配置（重要）
+## Cookie 配置
+
+### 小红书（重要）
 
 小红书对未登录访问限制较严，**不传 Cookie 时笔记页通常会被重定向到登录页**，接口会返回类似：
 
@@ -183,6 +218,20 @@ a1=19ff4898b5xxxxxxxxxxxx; web_session=0400698dcexxxxxxxxxxxx
 - **Cookie 会过期。** 若原本正常的服务突然开始报「账号异常」或「未登录」，通常是 Cookie 失效，重新获取即可。
 
 > Cookie 等同于账号登录凭证，请勿提交到公开仓库或分享给他人。
+
+### Instagram（可选）
+
+Instagram 公开帖文支持匿名访问，**不需要 Cookie**。只有私密帖文需要登录态。
+
+如需访问私密帖文，在请求中传入 `igCookie` 字段：
+
+```
+igCookie: "sessionid=xxx; ds_user_id=yyy; csrftoken=zzz"
+```
+
+获取方式：电脑浏览器登录 <https://www.instagram.com> → F12 → Network → 复制任意 `instagram.com` 请求的 Cookie 头。
+
+> Instagram Cookie 通常比小红书更持久，但频繁请求可能触发限流。
 
 ---
 
@@ -214,22 +263,28 @@ docker run -d -p 7776:7776 --shm-size=2g \
 替换 `YOUR_SERVER_IP` 和 Cookie 后执行：
 
 ```sh
+# 小红书
 curl -X POST http://YOUR_SERVER_IP:7776/getXhsPicUrl \
   -H 'Content-Type: application/json' \
   -d '{"shareText": "https://xhslink.cn/a/xxxxxx", "xhsCookie": "a1=...; web_session=..."}'
+
+# Instagram（公开帖文不需要 Cookie）
+curl -X POST http://YOUR_SERVER_IP:7776/getXhsPicUrl \
+  -H 'Content-Type: application/json' \
+  -d '{"shareText": "https://www.instagram.com/p/ABC123/"}'
 ```
 
 预期返回 `{"picUrlArray": [...]}`。curl 跑通后再去配快捷指令，能省去端到端排查时间。
 
 ### 2. 直接导入 .shortcut 文件
 
-仓库根目录的 [小红书图片下载.shortcut](小红书图片下载.shortcut) 是已生成好的可导入快捷指令文件，由 [build_shortcut.py](build_shortcut.py) 依据 [shortcut.json](shortcut.json) 的结构化描述自动生成。导入后只需填入服务地址和 Cookie 即可使用，**不再需要 14 步手动重建**。
+仓库根目录的 [小红书&Ins图片下载.shortcut](小红书&Ins图片下载.shortcut) 是已生成好的可导入快捷指令文件，由 [build_shortcut.py](build_shortcut.py) 依据 [shortcut.json](shortcut.json) 的结构化描述自动生成。导入后只需填入服务地址和 Cookie 即可使用，**不再需要 14 步手动重建**。
 
 **导入方式（任选其一）**：
 
 | 方式 | 操作 |
 | --- | --- |
-| **AirDrop** | Mac 下载本仓库中的 [小红书图片下载.shortcut](小红书图片下载.shortcut) → AirDrop 发送给 iPhone → 在弹窗中点「添加快捷指令」 |
+| **AirDrop** | Mac 下载本仓库中的 [小红书&Ins图片下载.shortcut](小红书&Ins图片下载.shortcut) → AirDrop 发送给 iPhone → 在弹窗中点「添加快捷指令」 |
 | **iCloud Drive** | 把文件放到 iCloud Drive → 在 iPhone 的「文件」App 中点击该文件 → 「添加快捷指令」 |
 | **Git clone + 拷贝** | `git clone` 后通过任意方式（邮件/网盘/U盘）将文件传到 iPhone 文件系统，再用「文件」App 打开 |
 
@@ -237,6 +292,16 @@ curl -X POST http://YOUR_SERVER_IP:7776/getXhsPicUrl \
 
 1. **服务地址文本**：把 `http://YOUR_SERVER_IP:7776/getXhsPicUrl` 改成实际部署地址
 2. **Cookie 文本**：把 `a1=...; web_session=...` 占位符替换为你的真实 Cookie
+
+如需重新生成 `.shortcut` 文件（修改了 `build_shortcut.py` 或 `shortcut.json` 后）：
+
+```sh
+python3 build_shortcut.py /tmp/xhs_download.plist
+cp /tmp/xhs_download.plist /tmp/xhs_download.shortcut
+/usr/bin/shortcuts sign --mode anyone -i /tmp/xhs_download.shortcut -o 小红书\&Ins图片下载.shortcut
+```
+
+> **注意：** `shortcuts sign` 要求输入文件扩展名为 `.shortcut`（即使内容是 raw plist），否则会报"文件格式不正确"。
 
 ### 3. 关键配置点（仅供修改快捷指令时参考）
 
@@ -256,7 +321,7 @@ curl -X POST http://YOUR_SERVER_IP:7776/getXhsPicUrl \
 若修改了 [shortcut.json](shortcut.json) 的步骤结构、变量名或默认值，需要用 [build_shortcut.py](build_shortcut.py) 重新生成产物：
 
 ```sh
-python3 build_shortcut.py   # 读取 shortcut.json，覆盖输出 小红书图片下载.shortcut
+python3 build_shortcut.py   # 读取 shortcut.json，覆盖输出 小红书&Ins图片下载.shortcut
 ```
 
 依赖仅标准库（`plistlib` + `uuid`），无需额外安装。
@@ -276,14 +341,23 @@ python3 build_shortcut.py   # 读取 shortcut.json，覆盖输出 小红书图�
 | 错误信息 | 原因与处理 |
 | --- | --- |
 | `缺少shareText参数` | 未传 `shareText`；或用了 form-encoded 而非 JSON，请加 `-H 'Content-Type: application/json'` |
+| `不支持的链接类型` | 链接既不是小红书也不是 Instagram，请检查分享文本中是否包含有效 URL |
+| `未能从分享文本中提取链接` | `shareText` 中不含 `http(s)://` 链接 |
+| **小红书错误** | |
 | `无法打开笔记页（账号异常…error_code=300011）` | 未传或 Cookie 已失效，请重新获取 `xhsCookie` |
 | `无法打开笔记页（未登录或链接已失效）` | 同上；同时确认链接完整保留了 `xsec_token` |
 | `被小红书安全验证拦截，请更新 xhsCookie 后重试` | 触发验证码。更换 Cookie / 网络环境，或本地设 `XHS_HEADLESS=false` 手动过验证 |
 | `未能获取笔记数据，可能是 Cookie 失效 / 笔记已删除 / 链接缺少 xsec_token` | 页面已打开但取不到数据，多为笔记被删除或权限受限 |
 | `不包含图片` | 笔记确实无图无视频（纯文本笔记） |
-| `未能从分享文本中提取链接` | `shareText` 中不含 `http(s)://` 链接 |
 | `解析分享链接失败: …` | 短链接展开失败，通常是服务器网络不通或短链已失效 |
-| 浏览器启动异常 / 容器内崩溃 | 加大共享内存：`--shm-size=2g` |
+| **Instagram 错误** | |
+| `该贴文需要登录才能访问` | 私密帖文，请在请求中传入 `igCookie` |
+| `贴文不存在或链接无效` | 链接中的 shortcode 无效，或帖文已被删除 |
+| `该贴文为视频，暂不支持` | Instagram 视频帖（Reel）暂不支持，instaloader 无法暴露视频 CDN URL |
+| `请求过于频繁` | Instagram 限流，稍后重试 |
+| `Instagram 处理异常` | 网络问题或 instaloader 内部错误，查看容器日志 |
+| **通用错误** | |
+| 浏览器启动异常 / 容器内崩溃 | 加大共享内存：`--shm-size=2g`（仅影响小红书） |
 
 查看容器日志定位问题：
 
@@ -295,11 +369,14 @@ docker logs -f xhs_dwd
 
 ## 本地开发
 
-需要 Node.js 与可运行的 Chromium。
+需要 Node.js、可运行的 Chromium，以及 Python 3（Instagram 功能）。
 
 ```sh
-# 安装依赖
+# 安装 Node.js 依赖
 npm install
+
+# 安装 Python 依赖（Instagram 图片提取）
+pip3 install -r requirements.txt
 
 # 首次需下载 Chromium（Docker 镜像已内置，无需执行）
 npx playwright install chromium
