@@ -58,7 +58,7 @@ def build_loader(ig_cookie=None):
         dirname_pattern="/tmp",
         filename_pattern="{shortcode}",
         quiet=True,
-        no_captions=True,
+        title_pattern="",
     )
     if ig_cookie:
         for part in ig_cookie.split(";"):
@@ -82,7 +82,7 @@ def extract_urls(loader, shortcode):
     elif post.typename == "GraphSidecar":
         for node in post.get_sidecar_nodes():
             if not node.is_video:
-                urls.append(node.url)
+                urls.append(node.display_url)
 
     elif post.typename == "GraphVideo":
         # 视频帖：instaloader 不暴露视频 CDN URL，无法返回直链
