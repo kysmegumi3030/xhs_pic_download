@@ -60,7 +60,16 @@ def build_loader(ig_cookie=None):
         filename_pattern="{shortcode}",
         quiet=True,
         title_pattern="",
+        request_timeout=15,
     )
+    # 显式设置 session 级代理（仅靠环境变量不够，instaloader 内部新建的
+    # requests.Session 不一定继承全局代理）
+    proxy_url = os.environ.get("IG_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+    if proxy_url:
+        loader.context._session.proxies = {
+            "http": proxy_url,
+            "https": proxy_url,
+        }
     if ig_cookie:
         for part in ig_cookie.split(";"):
             part = part.strip()
@@ -118,6 +127,12 @@ def main():
         sys.exit(0)
 
     loader = build_loader(ig_cookie or None)
+
+    # 调试信息输出到 stderr（不会混入 JSON stdout）
+    proxy_url = os.environ.get("IG_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+    sys.stderr.write(f"[ig_helper] shortcode={shortcode} proxy={proxy_url or 'none'}\n")
+    sys.stderr.flush()
+
     try:
         urls = extract_urls(loader, shortcode)
         if urls:

@@ -54,7 +54,7 @@ function detectPlatform(shareText) {
 
 /**
  * 调用 ig_helper.py 提取 Instagram 图片直链。
- * stdin 写入 JSON，stdout 读取 JSON 结果。
+ * stdin 写入 JSON，stdout 读取 JSON 结果。30 秒超时保护。
  */
 async function getIgPicUrl(shareText, igCookie, serverUrl) {
   return new Promise((resolve) => {
@@ -76,9 +76,17 @@ async function getIgPicUrl(shareText, igCookie, serverUrl) {
     child.stdout.on('data', (d) => { stdout += d })
     child.stderr.on('data', (d) => { stderr += d })
 
+    // 超时保护：防止 ig_helper.py 网络请求无限挂起
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM')
+      console.log(`ig_helper.py timeout (30s), stderr: ${stderr}`)
+      resolve({ error: 'Instagram 请求超时（30s），请检查代理配置或网络连接' })
+    }, 30000)
+
     child.on('close', (code) => {
+      clearTimeout(timer)
+      if (stderr) console.log(`ig_helper.py stderr: ${stderr}`)
       if (code !== 0) {
-        console.log(`ig_helper.py exited ${code}: ${stderr}`)
         resolve({ error: `Instagram 处理失败 (exit ${code})` })
         return
       }
@@ -92,6 +100,7 @@ async function getIgPicUrl(shareText, igCookie, serverUrl) {
     })
 
     child.on('error', (e) => {
+      clearTimeout(timer)
       console.log(`ig_helper.py spawn error: ${e.message}`)
       resolve({ error: `Instagram 脚本启动失败: ${e.message}` })
     })
