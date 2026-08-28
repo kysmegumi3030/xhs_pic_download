@@ -3,6 +3,29 @@ const { spawn } = require('child_process')
 const path = require('path')
 const { fetchNoteViaPlaywright } = require('./xhsPlaywright')
 
+// 代理支持：从环境变量读取，Docker 中通过 IG_PROXY / HTTP_PROXY / HTTPS_PROXY 设置
+function getProxyConfig() {
+  const proxyUrl = process.env.IG_PROXY || process.env.HTTP_PROXY || process.env.HTTPS_PROXY
+  if (!proxyUrl) return {}
+  try {
+    const u = new URL(proxyUrl)
+    return {
+      proxy: {
+        protocol: u.protocol,
+        host: u.hostname,
+        port: parseInt(u.port, 10),
+      }
+    }
+  } catch (e) {
+    console.log(`proxy URL parse failed: ${e.message}`)
+    return {}
+  }
+}
+const PROXY_CONFIG = getProxyConfig()
+if (PROXY_CONFIG.proxy) {
+  console.log(`using proxy: ${process.env.IG_PROXY || process.env.HTTP_PROXY}`)
+}
+
 // Instagram URL 检测
 const IG_URL_RE = /instagram\.com\/(?:p|reel|reels|tv)\//
 const IG_DOMAIN_RE = /(?:instagram\.com|instagr\.am)/
@@ -134,7 +157,8 @@ async function getFullURL(shortURLWithText) {
   try {
     await axios.get(shortURL, {
       headers,
-      maxRedirects: 0
+      maxRedirects: 0,
+      ...PROXY_CONFIG,
     })
     return shortURL
   } catch (error) {

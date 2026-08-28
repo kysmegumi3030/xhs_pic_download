@@ -36,6 +36,9 @@ const USER_AGENT =
 // 复用同一个浏览器进程，避免每个请求都冷启动 Chromium
 let browserPromise = null
 
+// 代理支持：Docker 中通过 IG_PROXY / HTTP_PROXY / HTTPS_PROXY 设置
+const PROXY_SERVER = process.env.IG_PROXY || process.env.HTTP_PROXY || process.env.HTTPS_PROXY || ''
+
 async function getBrowser() {
   if (browserPromise) {
     try {
@@ -49,8 +52,14 @@ async function getBrowser() {
     browserPromise = null
   }
 
+  const launchOpts = { headless: HEADLESS, args: LAUNCH_ARGS }
+  if (PROXY_SERVER) {
+    launchOpts.proxy = { server: PROXY_SERVER }
+    console.log(`Playwright proxy: ${PROXY_SERVER}`)
+  }
+
   browserPromise = chromium
-    .launch({ headless: HEADLESS, args: LAUNCH_ARGS })
+    .launch(launchOpts)
     .catch((err) => {
       browserPromise = null
       throw err

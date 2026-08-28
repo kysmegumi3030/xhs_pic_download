@@ -10,6 +10,7 @@ stdout JSON: {"picUrlArray": ["https://..."]}  或  {"error": "..."}
 """
 
 import json
+import os
 import re
 import sys
 
@@ -93,6 +94,13 @@ def extract_urls(loader, shortcode):
 
 
 def main():
+    # 代理支持：Docker 中通过 IG_PROXY / HTTP_PROXY / HTTPS_PROXY 设置
+    # Python requests 自动读取这些环境变量，无需额外配置
+    ig_proxy = os.environ.get("IG_PROXY")
+    if ig_proxy:
+        os.environ.setdefault("HTTP_PROXY", ig_proxy)
+        os.environ.setdefault("HTTPS_PROXY", ig_proxy)
+
     try:
         raw = sys.stdin.read()
         req = json.loads(raw)

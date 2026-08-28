@@ -1,0 +1,46 @@
+# docker-compose.yml
+#
+# 用法：
+#   1. 将本文件放到服务器上，与 Dockerfile 在同一目录
+#   2. 修改下方 xhs_dwd 的 IG_PROXY 地址（v2rayA 容器名 + 端口）
+#   3. docker compose up -d
+#
+# 如果 v2rayA 已在运行，确保两个容器在同一 Docker 网络中：
+#   docker network connect <v2rayA的网络> xhs_dwd
+# 或重新创建两个容器（推荐用本文件统一管理）
+
+services:
+  xhs_dwd:
+    build: .
+    container_name: xhs_dwd
+    ports:
+      - "7776:7776"
+    shm_size: 2g
+    environment:
+      - TZ=Asia/Shanghai
+      # 代理配置：指向 v2rayA 容器的 HTTP 代理端口
+      # 如果 v2rayA 容器名不是 v2raya，请改成实际容器名
+      - IG_PROXY=http://v2raya:20171
+      # 以下变量让 Node.js 和 Python 全局走代理
+      - HTTP_PROXY=http://v2raya:20171
+      - HTTPS_PROXY=http://v2raya:20171
+      - NO_PROXY=localhost,127.0.0.1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16
+    depends_on:
+      - v2raya
+    restart: unless-stopped
+
+  v2raya:
+    image: v2raya/v2raya:latest
+    container_name: v2raya
+    ports:
+      - "20170:20170"     # SOCKS5 代理
+      - "20171:20171"     # HTTP 代理（xhs_dwd 使用此端口）
+      - "20172:20172"     # SocksFor9
+      - "20173:20173"     # SocksFor9
+    volumes:
+      - v2raya_data:/etc/v2raya
+    restart: unless-stopped
+    privileged: true
+
+volumes:
+  v2raya_data:
