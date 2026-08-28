@@ -102,6 +102,7 @@ def main():
 
     share_text = req.get("shareText", "")
     ig_cookie = req.get("igCookie", "")
+    proxy_base = req.get("proxyBaseUrl", "")
 
     shortcode = extract_shortcode(share_text)
     if not shortcode:
@@ -112,6 +113,11 @@ def main():
     try:
         urls = extract_urls(loader, shortcode)
         if urls:
+            # Instagram CDN 校验 Referer，iOS 快捷指令无法设置正确的 Referer，
+            # 所以通过服务端代理下载。将直链转为 /ig-proxy?url=... 代理链接。
+            if proxy_base:
+                from urllib.parse import quote
+                urls = [f"{proxy_base}/ig-proxy?url={quote(u, safe='')}" for u in urls]
             print(json.dumps({"picUrlArray": urls}))
         else:
             print(json.dumps({"error": "该贴文不包含可提取的图片"}))

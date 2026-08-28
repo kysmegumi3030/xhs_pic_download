@@ -33,14 +33,18 @@ function detectPlatform(shareText) {
  * 调用 ig_helper.py 提取 Instagram 图片直链。
  * stdin 写入 JSON，stdout 读取 JSON 结果。
  */
-async function getIgPicUrl(shareText, igCookie) {
+async function getIgPicUrl(shareText, igCookie, serverUrl) {
   return new Promise((resolve) => {
     const scriptPath = path.join(__dirname, 'ig_helper.py')
     const child = spawn('python3', [scriptPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
     })
 
-    const input = JSON.stringify({ shareText, igCookie: igCookie || '' })
+    const input = JSON.stringify({
+      shareText,
+      igCookie: igCookie || '',
+      proxyBaseUrl: serverUrl || '',
+    })
     child.stdin.write(input)
     child.stdin.end()
 
@@ -75,6 +79,7 @@ module.exports = async function (params, context) {
   const shareText = params['shareText']
   const xhsCookie = params['xhsCookie']
   const igCookie = params['igCookie']
+  const serverUrl = params['serverUrl']
   if (!shareText) {
     return {
       error: '缺少shareText参数',
@@ -86,7 +91,7 @@ module.exports = async function (params, context) {
   console.log(`platform->${platform || 'unknown'}`)
 
   if (platform === 'instagram') {
-    return await getIgPicUrl(shareText, igCookie)
+    return await getIgPicUrl(shareText, igCookie, serverUrl)
   }
 
   if (platform === 'xiaohongshu') {
